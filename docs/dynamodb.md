@@ -26,6 +26,6 @@ On-demand
 {
   "shortId": "Ab12Cd",
   "originalUrl": "https://www.google.com",
-  "createdAt": "2026-07-07T10:20:30Z"
+  "createdAt": "2026-07-07T10:20:30.123456+00:00"
 }
 ```
