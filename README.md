@@ -4,9 +4,14 @@ A simple serverless URL shortener built with **AWS Lambda**, **API Gateway**, an
 
 This project demonstrates how to build a fully serverless REST API using AWS services. Users can submit a long URL, receive a generated short ID, and access the original URL through an HTTP redirect.
 
----
+## Architecture
 
-# Architecture
+![Architecture diagram](docs/architecture-diagram.png)
+
+A step-by-step walkthrough of both request flows, with AWS console screenshots, is in [`Serverless_Architecture.xlsx`](Serverless_Architecture.xlsx).
+
+<details>
+<summary>Text version</summary>
 
 ```text
                     Client
@@ -31,9 +36,9 @@ create-short-url              redirect-url
                 Amazon DynamoDB
 ```
 
----
+</details>
 
-# AWS Services
+## AWS Services
 
 - AWS Lambda
 - Amazon API Gateway (HTTP API)
@@ -41,9 +46,7 @@ create-short-url              redirect-url
 - AWS IAM
 - Amazon CloudWatch
 
----
-
-# Features
+## Features
 
 - Create shortened URLs
 - Redirect to the original URL using HTTP 302
@@ -53,93 +56,71 @@ create-short-url              redirect-url
 - Error handling
 - CloudWatch logging
 
----
-
-# Project Structure
+## Project Structure
 
 ```text
 aws-serverless-url-shortener/
-│
-├── create-short-url/
-│   └── lambda_function.py
-│
-├── redirect-url/
-│   └── lambda_function.py
-│
+├── lambda/
+│   ├── create/
+│   │   └── index.py               # create-short-url Lambda (POST /shorten)
+│   └── redirect/
+│       └── index.py               # redirect-url Lambda (GET /{shortId})
+├── docs/
+│   ├── apigateway.md              # API type, routes, request/response examples
+│   ├── dynamodb.md                # table configuration and item example
+│   └── architecture-diagram.png
+├── Serverless_Architecture.xlsx   # step-by-step walkthrough with console screenshots
 └── README.md
 ```
 
----
+> In the Lambda console each function's code lives in `lambda_function.py` (handler `lambda_function.lambda_handler`). In this repo the same code is saved as `index.py`, so if you upload the file as-is, set the handler to `index.lambda_handler`.
 
-# DynamoDB
+## DynamoDB
 
-## Table Configuration
+### Table Configuration
 
-**Table Name**
+| Setting | Value |
+|---|---|
+| Table name | `url-shortener` |
+| Partition key | `shortId` (String) |
+| Billing mode | On-demand |
 
-```text
-url-shortener
-```
-
-**Partition Key**
-
-```text
-shortId (String)
-```
-
-**Billing Mode**
-
-```text
-On-demand
-```
-
-## Item Example
+### Item Example
 
 ```json
 {
   "shortId": "Ab12Cd",
   "originalUrl": "https://www.google.com",
-  "createdAt": "2026-07-07T10:20:30Z"
+  "createdAt": "2026-07-07T10:20:30.123456+00:00"
 }
 ```
 
----
+`createdAt` is written with `datetime.now(timezone.utc).isoformat()`, so it is an ISO 8601 UTC timestamp with microseconds and a `+00:00` offset.
 
-# API Gateway
+## API Gateway
 
-## API Type
+### API Type
 
-```text
 HTTP API
-```
 
-## Routes
+### Routes
 
 | Method | Path | Lambda |
 |---------|------|--------|
 | POST | /shorten | create-short-url |
 | GET | /{shortId} | redirect-url |
 
----
+## API Examples
 
-# API Examples
+### Create Short URL
 
-## Create Short URL
-
-### Request
-
-```http
-POST /shorten
-Content-Type: application/json
+```bash
+curl -X POST https://<api-id>.execute-api.ap-southeast-2.amazonaws.com/shorten \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.google.com"}'
 ```
 
-```json
-{
-  "url": "https://www.google.com"
-}
-```
-
-### Response
+Response (`200 OK`):
 
 ```json
 {
@@ -148,25 +129,30 @@ Content-Type: application/json
 }
 ```
 
----
+### Redirect
 
-## Redirect
-
-### Request
-
-```http
-GET /Ab12Cd
+```bash
+curl -i https://<api-id>.execute-api.ap-southeast-2.amazonaws.com/Ab12Cd
 ```
 
-### Response
+If the short ID exists, the API returns an **HTTP 302 Redirect** with a `Location` header pointing to the original URL, and the browser opens it automatically.
 
-If the short ID exists, the API returns an **HTTP 302 Redirect** response and redirects the client to the original URL.
+### Error Responses
 
----
+Errors are returned as JSON with a `message` field:
 
-# Lambda Functions
+| Endpoint | Status | `message` | When |
+|---|---|---|---|
+| POST /shorten | 400 | `Invalid JSON` | The request body is not valid JSON |
+| POST /shorten | 400 | `url is required` | `url` is missing or empty |
+| POST /shorten | 500 | `Failed to save URL` | The DynamoDB write failed |
+| GET /{shortId} | 400 | `shortId is required` | The path parameter is missing |
+| GET /{shortId} | 404 | `Short URL not found` | No item exists for this ID |
+| GET /{shortId} | 500 | `Internal Server Error` | The DynamoDB read failed |
 
-## create-short-url
+## Lambda Functions
+
+### create-short-url
 
 Responsibilities:
 
@@ -175,9 +161,7 @@ Responsibilities:
 - Store the URL in DynamoDB
 - Return the generated short ID
 
----
-
-## redirect-url
+### redirect-url
 
 Responsibilities:
 
@@ -186,9 +170,7 @@ Responsibilities:
 - Return an HTTP 302 redirect response
 - Return HTTP 404 if the short ID does not exist
 
----
-
-# Environment Variables
+## Environment Variables
 
 Both Lambda functions require the following environment variable:
 
@@ -196,48 +178,44 @@ Both Lambda functions require the following environment variable:
 |------|-------|
 | TABLE_NAME | url-shortener |
 
----
+## Setup (manual, AWS console)
 
-# Example Workflow
+The project was built by hand in the AWS console in `ap-southeast-2` (Sydney); there is no infrastructure as code yet. To recreate it:
 
-```text
-1. Client sends POST /shorten
-                │
-                ▼
-      API Gateway
-                │
-                ▼
-      create-short-url Lambda
-                │
-                ▼
-          DynamoDB
-                │
-                ▼
-      Returns shortId
+1. **DynamoDB** — Create the `url-shortener` table with partition key `shortId` (String) and on-demand billing.
+2. **IAM** — Give each function an execution role with the `AWSLambdaBasicExecutionRole` managed policy (CloudWatch logging) plus only the table access it needs:
 
------------------------------------------
+   `create-short-url` (write only):
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": "dynamodb:PutItem",
+         "Resource": "arn:aws:dynamodb:<region>:<account-id>:table/url-shortener"
+       }
+     ]
+   }
+   ```
 
-2. Client requests /Ab12Cd
-                │
-                ▼
-        API Gateway
-                │
-                ▼
-       redirect-url Lambda
-                │
-                ▼
-         DynamoDB lookup
-                │
-                ▼
-        HTTP 302 Redirect
-                │
-                ▼
-        Original Website
-```
+   `redirect-url` (read only): the same policy with `dynamodb:GetItem` instead of `dynamodb:PutItem`.
+3. **Lambda** — Create the `create-short-url` and `redirect-url` Python functions with those roles, paste in the code from `lambda/create/index.py` and `lambda/redirect/index.py`, and set `TABLE_NAME=url-shortener` on both.
+4. **API Gateway** — Create an HTTP API with a `POST /shorten` route integrated with `create-short-url` and a `GET /{shortId}` route integrated with `redirect-url`.
+5. **Test** — Use the `curl` commands in [API Examples](#api-examples).
 
----
+## Cost and Cleanup
 
-# Future Improvements
+At demo traffic the cost is effectively zero: Lambda and DynamoDB stay within their free allowances, and HTTP API requests are billed per million.
+
+To remove everything, delete the HTTP API, both Lambda functions and their log groups (`/aws/lambda/create-short-url`, `/aws/lambda/redirect-url`), the `url-shortener` table, and the IAM roles.
+
+## Known Limitations
+
+- **Short ID collisions** — IDs are 6 random characters and are written without a condition, so a (rare) collision would silently overwrite an existing link. A conditional write (`attribute_not_exists(shortId)`) with a retry would prevent this.
+- **No URL validation** — any non-empty string is stored and later returned in the `Location` header. Accepting only `http`/`https` URLs would be safer.
+
+## Future Improvements
 
 - Return the complete shortened URL instead of only the short ID.
 - Prevent duplicate shortened URLs for the same original URL.
@@ -246,9 +224,7 @@ Both Lambda functions require the following environment variable:
 - Deploy the infrastructure using AWS SAM or Terraform.
 - Add automated tests.
 
----
-
-# Learning Objectives
+## Learning Objectives
 
 This project demonstrates:
 
